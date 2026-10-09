@@ -1,0 +1,58 @@
+name: Poll MiniBench
+
+# schedule が発火しないため、1 回の起動で長く回る形にした。
+# 15 分ごとに MiniBench を見て、未予測の出題があれば予測する。
+# 既予測は飛ばす設定が効いているので、出題がない間は LLM を呼ばず費用0。
+#
+# 残高 $10 を MiniBench 1 ラウンドに集中させる判断に基づく。本戦は
+# $10 ではカバー率が1割に届かず、配分がピアスコアの2乗比例なので
+# 支払下限 $50 に乗らない。
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Poll relay"]
+    types: [completed]
+
+concurrency:
+  group: poll-minibench
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Poll for five and a half hours
+        run: |
+          set +e
+          END=$(( $(date +%s) + 19200 ))   # 5 時間 20 分
+          N=0
+          while [ "$(date +%s)" -lt "$END" ]; do
+            N=$(( N + 1 ))
+            echo "=============== 周回 $N  $(date -u +%H:%M:%SZ) ==============="
+            poetry run python count_open.py
+            poetry run python main.py --mode minibench
+            echo "--- 周回 $N 終了 (exit $?) ---"
+            sleep 900
+          done
+          echo "打ち切り。周回 $N 回"
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ASKNEWS_CLIENT_ID: ${{ secrets.ASKNEWS_CLIENT_ID }}
+          ASKNEWS_SECRET: ${{ secrets.ASKNEWS_SECRET }}
