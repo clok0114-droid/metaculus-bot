@@ -1,0 +1,16 @@
+name: Chain B
+
+on:
+  workflow_run:
+    workflows: ["Chain A"]
+    types: [completed]
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    if: github.run_number < 6
+    steps:
+      - name: Report
+        run: |
+          echo "Chain B  run_number=${{ github.run_number }}  event=${{ github.event_name }}"
+          sleep 30
