@@ -8,10 +8,11 @@ name: Forecast on Market Pulse
 # した結果、1 回 $3.32 → $4.47 に上がった（落ちていた分が完走した正しい増加）。
 # 残高 $20 で週 1 回なら 4 週で尽きる。四半期単位の勝負で途中で止まるのが
 # 最悪なので、隔週にして四半期末まで持たせる。クレジットが降りたら上げる。
+# cron は外した。Market Pulse は spot scoring で、締切時点に立って
+# いる予測1点だけが採点される。定期更新は点に寄与せず支出だけが増える。
+# 締切直前に手動で1回投げるのが正しい。
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 1 */14 * *"  # 14日ごと 01:17 UTC（日本時間 10:17）
 
 concurrency:
   group: ${{ github.workflow }}
