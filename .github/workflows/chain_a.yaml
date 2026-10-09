@@ -1,0 +1,20 @@
+name: Chain A
+
+# schedule が発火しないため、別の起動機構を測っている。
+# A 完了 -> B 起動 -> A 起動 ... が何段続くかを見る。LLM は呼ばない。
+# run_number で止める（暴走させない）。
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Chain B"]
+    types: [completed]
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    if: github.run_number < 6
+    steps:
+      - name: Report
+        run: |
+          echo "Chain A  run_number=${{ github.run_number }}  event=${{ github.event_name }}"
+          sleep 30
