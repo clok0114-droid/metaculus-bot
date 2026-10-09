@@ -1,0 +1,16 @@
+name: Poll relay
+
+# Poll MiniBench が終わったら、もう一度起動する。
+# workflow_run の連鎖は実測で 3 段まで続く（永久ではない）。
+# この中継自体は何もしない。
+on:
+  workflow_run:
+    workflows: ["Poll MiniBench"]
+    types: [completed]
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hand back
+        run: echo "relay  run_number=${{ github.run_number }}"
