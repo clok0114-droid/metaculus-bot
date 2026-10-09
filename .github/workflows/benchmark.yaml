@@ -1,0 +1,51 @@
+name: Benchmark bot variants
+
+# 手動起動のみ。コミュニティ予測を基準にした A/B 測定で、Metaculus には投稿しない。
+on:
+  workflow_dispatch:
+    inputs:
+      questions:
+        description: "使う問題数（既定 100。少ないと小さな差は判別できない）"
+        required: false
+        default: "100"
+      fetch_only:
+        description: "1 にすると問題の取得だけ行い、LLM を呼ばない（費用0）"
+        required: false
+        default: "0"
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark_job:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Run benchmark
+        run: |
+          poetry run python benchmark.py
+        env:
+          BENCHMARK_QUESTIONS: ${{ github.event.inputs.questions }}
+          BENCHMARK_FETCH_ONLY: ${{ github.event.inputs.fetch_only }}
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ASKNEWS_CLIENT_ID: ${{ secrets.ASKNEWS_CLIENT_ID }}
+          ASKNEWS_SECRET: ${{ secrets.ASKNEWS_SECRET }}

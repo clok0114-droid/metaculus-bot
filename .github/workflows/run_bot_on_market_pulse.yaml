@@ -1,0 +1,47 @@
+name: Forecast on Market Pulse
+
+# Market Pulse は bot が賞金対象の別プール。賞金の条件に「問題の生存中に
+# 予測を更新し続けること」が入っているので、1回投げるだけでは条件を半分しか
+# 満たさない。
+#
+# 頻度は残高で決まる。タイムアウトを 240 秒へ延ばして予測が 5 本揃うように
+# した結果、1 回 $3.32 → $4.47 に上がった（落ちていた分が完走した正しい増加）。
+# 残高 $20 で週 1 回なら 4 週で尽きる。四半期単位の勝負で途中で止まるのが
+# 最悪なので、隔週にして四半期末まで持たせる。クレジットが降りたら上げる。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 1 */14 * *"  # 14日ごと 01:17 UTC（日本時間 10:17）
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  forecast_job:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Run bot
+        run: |
+          poetry run python main.py --mode market_pulse
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ASKNEWS_CLIENT_ID: ${{ secrets.ASKNEWS_CLIENT_ID }}
+          ASKNEWS_SECRET: ${{ secrets.ASKNEWS_SECRET }}

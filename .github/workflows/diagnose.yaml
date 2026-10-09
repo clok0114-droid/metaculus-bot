@@ -1,0 +1,27 @@
+name: Diagnose benchmark question filters
+
+# 問題の取得だけを行い LLM を呼ばない。費用0。
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Diagnose
+        run: |
+          poetry run python diagnose_questions.py
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
