@@ -1,0 +1,24 @@
+name: OpenRouter の残高照会
+
+# 鍵は secrets にしかないので、ジョブの中から照会する。LLM は呼ばないので費用0。
+on:
+  workflow_dispatch:
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 照会
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -e
+          echo "===== /api/v1/key ====="
+          curl -sS -H "Authorization: Bearer $OPENROUTER_API_KEY"             https://openrouter.ai/api/v1/key | python3 -m json.tool || echo "取得失敗"
+          echo
+          echo "===== /api/v1/credits ====="
+          curl -sS -H "Authorization: Bearer $OPENROUTER_API_KEY"             https://openrouter.ai/api/v1/credits | python3 -m json.tool || echo "取得失敗"
+          echo
+          echo "===== 鍵の長さ（値は出さない） ====="
+          echo "${#OPENROUTER_API_KEY} 文字"
