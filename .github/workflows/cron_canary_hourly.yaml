@@ -1,0 +1,19 @@
+name: cron canary hourly
+
+# 1本目（10分 cron）が 23 時間で 3 回しか発火しなかった。
+# 頻度が原因なのか、このリポジトリで schedule 自体が間引かれるのかを分ける。
+# 1 時間に 1 回だけ要求する。計算は何もせず、LLM も呼ばない。
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 時刻を出すだけ
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
