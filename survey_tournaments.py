@@ -51,11 +51,13 @@ print("=" * 78)
 print("1) トーナメント一覧の場所を探す")
 for path in ("/projects/tournaments/", "/tournaments/", "/projects/"):
     data = get(path, limit=100)
-    if "_error" in data:
+    # 一覧は辞書（results 入り）でもリストでも返る。エラーは辞書の _error のみ。
+    if isinstance(data, dict) and "_error" in data:
         print(f"   {path:<28} {data['_error']}")
         time.sleep(2)
         continue
-    rows = data.get("results", data if isinstance(data, list) else [])
+    rows = data if isinstance(data, list) else data.get("results", [])
+    rows = [r for r in rows if isinstance(r, dict)]
     print(f"   {path:<28} ok  {len(rows)} 件")
     for item in rows:
         slug = str(item.get("slug") or "")
