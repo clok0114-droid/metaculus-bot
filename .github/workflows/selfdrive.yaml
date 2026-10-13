@@ -18,11 +18,15 @@ name: 自走ループ
 # だけ）。checkout や install-poetry と同じランナーに PAT を載せない。
 
 on:
+  # 3時間ごとの心拍。連鎖が止まったあとの拾い直しだけを担う。
+  # 1回の上限は8問・$1.88、未予測が無ければ $0。
+  schedule:
+    - cron: "41 */3 * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "対象（minibench / tournament / market_pulse）"
-        default: minibench
+        description: "対象（tournament / minibench / market_pulse）"
+        default: tournament
       tournament:
         description: "対象を明示する（slug か id。空なら --mode の既定）"
         default: ""
@@ -70,7 +74,8 @@ jobs:
         id: run
         run: |
           poetry run python main.py \
-            --mode "${{ inputs.mode || 'minibench' }}" \
+            --mode "${{ inputs.mode || 'tournament' }}" \
+            --tournament "${{ inputs.tournament }}" \
             --max-questions "${{ inputs.max_questions || '8' }}" \
             --min-credits "${{ inputs.min_credits || '1.00' }}"
         env:
@@ -102,7 +107,7 @@ jobs:
       - name: 次の回を予約する
         env:
           SELFDRIVE_PAT: ${{ secrets.SELFDRIVE_PAT }}
-          MODE: ${{ inputs.mode || 'minibench' }}
+          MODE: ${{ inputs.mode || 'tournament' }}
           TOURN: ${{ inputs.tournament }}
           MAXQ: ${{ inputs.max_questions || '8' }}
           MINC: ${{ inputs.min_credits || '1.00' }}
@@ -121,8 +126,8 @@ jobs:
           fi
           echo "${NAP} 秒待ってから、残り ${NEXT} 回として起動する"
           sleep "$NAP"
-          payload=$(printf '{"ref":"main","inputs":{"mode":"%s","max_questions":"%s","min_credits":"%s","iterations_left":"%s","sleep_seconds":"%s"}}' \
-            "$MODE" "$MAXQ" "$MINC" "$NEXT" "$NAP")
+          payload=$(printf '{"ref":"main","inputs":{"mode":"%s","tournament":"%s","max_questions":"%s","min_credits":"%s","iterations_left":"%s","sleep_seconds":"%s"}}' \
+            "$MODE" "$TOURN" "$MAXQ" "$MINC" "$NEXT" "$NAP")
           code=$(curl -sS -o /tmp/dispatch.txt -w '%{http_code}' -X POST \
             -H "Authorization: Bearer ${SELFDRIVE_PAT}" \
             -H "Accept: application/vnd.github+json" \
