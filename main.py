@@ -1,8 +1,10 @@
 import argparse
 import asyncio
 import itertools
+import json
 import logging
 import os
+import urllib.request
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -42,9 +44,99 @@ from forecasting_tools import (
     clean_indents,
     structure_output,
 )
+from forecasting_tools.helpers.metaculus_client import ApiFilter
 
 dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# 予算の歯止め
+#
+# tournament / minibench モードは「open かつ自分の予測がまだ無い問題」すべてに
+# 課金する。1回の実行が何問を拾うかは出題側が決めるので、こちら側に上限が
+# 無いと残高を一度に使い切れてしまう。独立した歯止めを2つかける。
+#   --max-questions  1回の実行で予測する問題数の上限
+#   --min-credits    この残高を下回るなら予測しない（下限を踏み越えない）
+# 単価は Market Pulse の実測 19問 / $4.47 = $0.235/問。
+# ---------------------------------------------------------------------------
+
+COST_PER_QUESTION = 0.235
+
+
+def remaining_credits() -> float | None:
+    """OpenRouter の残高。照会できなければ None を返し、歯止めはかけない。"""
+    key = os.getenv("OPENROUTER_API_KEY")
+    if not key:
+        return None
+    request = urllib.request.Request(
+        "https://openrouter.ai/api/v1/credits",
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = json.load(response)["data"]
+        return float(data["total_credits"]) - float(data["total_usage"])
+    except Exception as exc:
+        logger.warning(f"残高を照会できなかった: {type(exc).__name__}: {exc}")
+        return None
+
+
+def already_forecasted(question) -> bool:
+    """自分の予測が既に載っているか。count_open.py と同じ判定を使う。"""
+    api_json = getattr(question, "api_json", None) or {}
+    inner = api_json.get("question") or {}
+    mine = inner.get("my_forecasts")
+    return isinstance(mine, dict) and mine.get("latest") is not None
+
+
+def _close_time(question):
+    value = getattr(question, "close_time", None)
+    if value is None:
+        return datetime.max.replace(tzinfo=timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+async def pick_questions(client, tournament_ids, cap: int):
+    """未予測の問題を、締切の早い順に cap 件まで返す（cap が 0 なら全件）。
+
+    締切順にするのは残高が限られているため。締切の近い問題を落とすと二度と
+    採点されないが、遠い問題は次の実行で拾える。
+    """
+    pool = []
+    for tournament_id in tournament_ids:
+        try:
+            questions = await client.get_questions_matching_filter(
+                ApiFilter(
+                    allowed_tournaments=[tournament_id], allowed_statuses=["open"]
+                ),
+                error_if_question_target_missed=False,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"{tournament_id} の取得に失敗: {type(exc).__name__}: {exc}"
+            )
+            continue
+        fresh = [q for q in questions if not already_forecasted(q)]
+        logger.info(
+            f"{tournament_id}: open {len(questions)} 問 / 未予測 {len(fresh)} 問"
+        )
+        pool += fresh
+    pool.sort(key=_close_time)
+    return pool[:cap] if cap > 0 else pool
+
+
+def emit_github_output(**pairs) -> None:
+    """後続ジョブへ値を渡す。GitHub Actions の外では何もしない。"""
+    path = os.getenv("GITHUB_OUTPUT")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as handle:
+        for key, value in pairs.items():
+            handle.write(f"{key}={value}\n")
+
 
 
 class FallTemplateBot2026(ForecastBot):
@@ -834,12 +926,51 @@ if __name__ == "__main__":
         default="tournament",
         help="What to forecast on (default: tournament)",
     )
+    parser.add_argument(
+        "--max-questions",
+        type=int,
+        default=0,
+        help="1回の実行で予測する問題数の上限。0 なら無制限（従来の挙動）",
+    )
+    parser.add_argument(
+        "--min-credits",
+        type=float,
+        default=0.0,
+        help="OpenRouter の残高がこの額を下回るなら予測しない。0 で歯止めなし",
+    )
     args = parser.parse_args()
     run_mode: Literal[
         "tournament", "minibench", "market_pulse", "metaculus_cup", "test_questions"
     ] = args.mode
 
     check_environment(strict=True)
+
+    # 残高の歯止め。下限を下回っていれば、何も予測せず正常終了する。
+    # 自走ループの再起動ジョブは、ここで出す proceed を見て止まる。
+    cap = args.max_questions
+    balance = remaining_credits()
+    if balance is not None:
+        print(f"OpenRouter 残高 ${balance:.2f}")
+        if args.min_credits > 0:
+            affordable = int((balance - args.min_credits) / COST_PER_QUESTION)
+            if affordable <= 0:
+                print(
+                    f"残高 ${balance:.2f} が下限 ${args.min_credits:.2f} に達した。"
+                    "予測せず終了する"
+                )
+                emit_github_output(
+                    proceed="false",
+                    hit_cap="false",
+                    forecasted="0",
+                    remaining=f"{balance:.2f}",
+                )
+                raise SystemExit(0)
+            if cap <= 0 or affordable < cap:
+                print(f"残高から払えるのは {affordable} 問まで。上限をそこへ下げる")
+                cap = affordable
+    if cap > 0:
+        print(f"この実行の上限 {cap} 問（概算 ${cap * COST_PER_QUESTION:.2f}）")
+
     publish_to_metaculus = True
     print_startup_banner(run_mode, will_publish=publish_to_metaculus)
 
@@ -886,26 +1017,36 @@ if __name__ == "__main__":
     # exceptions, since return_exceptions=True) which then flows into the
     # summary printers below.
     client = MetaculusClient()
-    if run_mode == "tournament":
-        seasonal_tournament_reports = asyncio.run(
-            template_bot.forecast_on_tournament(
-                client.CURRENT_AI_COMPETITION_ID, return_exceptions=True
-            )
+    if run_mode in ("tournament", "minibench"):
+        # 上限をかけるため `forecast_on_tournament` を使わず、自分で取得して
+        # `forecast_questions` へ渡す（market_pulse の分岐と同じ作り）。
+        # tournament は FutureEval 本戦と MiniBench の両方を対象にする。
+        # minibench は2週間・約60問・賞金 $1,000 で回転が速く、本戦の
+        # 300〜500問に載せる前に順位と較正を測れる。
+        targets = (
+            [client.CURRENT_AI_COMPETITION_ID, client.CURRENT_MINIBENCH_ID]
+            if run_mode == "tournament"
+            else [client.CURRENT_MINIBENCH_ID]
         )
-        minibench_reports = asyncio.run(
-            template_bot.forecast_on_tournament(
-                client.CURRENT_MINIBENCH_ID, return_exceptions=True
+        selected = asyncio.run(pick_questions(client, targets, cap))
+        print(f"予測する問題 {len(selected)} 問（締切の早い順）")
+        if not selected:
+            print("未予測の問題が無い。課金せず終了する")
+            emit_github_output(
+                proceed="true",
+                hit_cap="false",
+                forecasted="0",
+                remaining="" if balance is None else f"{balance:.2f}",
             )
-        )
-        forecast_reports = seasonal_tournament_reports + minibench_reports
-    elif run_mode == "minibench":
-        # MiniBench だけを対象にする。2週間・約60問・賞金$1,000 の回転が速い
-        # トーナメントなので、本戦の300〜500問に載せる前に、ここで実際の
-        # 順位と較正を測るために使う。
+            raise SystemExit(0)
         forecast_reports = asyncio.run(
-            template_bot.forecast_on_tournament(
-                client.CURRENT_MINIBENCH_ID, return_exceptions=True
-            )
+            template_bot.forecast_questions(selected, return_exceptions=True)
+        )
+        emit_github_output(
+            proceed="true",
+            hit_cap="true" if cap > 0 and len(selected) >= cap else "false",
+            forecasted=str(len(selected)),
+            remaining="" if balance is None else f"{balance:.2f}",
         )
     elif run_mode == "market_pulse":
         # bot が賞金対象の別プール。条件が2つあり、どちらも既定の挙動と逆。
