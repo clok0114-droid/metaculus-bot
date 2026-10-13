@@ -1,0 +1,16 @@
+name: open の問題数を数える
+
+# どのトーナメントに open の問題があるかを数えるだけ。LLM を呼ばないので費用0。
+on:
+  workflow_dispatch:
+
+jobs:
+  survey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 数える
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+        run: python3 survey_tournaments.py
