@@ -63,6 +63,13 @@ logger = logging.getLogger(__name__)
 
 COST_PER_QUESTION = 0.235
 
+# forecasting_tools の CURRENT_AI_COMPETITION_ID は 33022 を指している。これは
+# slug `summer-futureeval-2026`（Summer 2026）で、2026-10-13 時点の実測では
+# open が告知 1 件だけ。現行シーズンは id 33121 / `fall-futureeval-2026` で
+# 2027-03-05 まで開いている。SDK 定数が回るのを待つと 1 シーズン取りこぼす
+# ので、ここで明示する。`--tournament` で上書きもできる。
+FALL_FUTUREEVAL_2026 = 33121
+
 
 def remaining_credits() -> float | None:
     """OpenRouter の残高。照会できなければ None を返し、歯止めはかけない。"""
@@ -933,6 +940,15 @@ if __name__ == "__main__":
         help="1回の実行で予測する問題数の上限。0 なら無制限（従来の挙動）",
     )
     parser.add_argument(
+        "--tournament",
+        type=str,
+        default="",
+        help=(
+            "対象を明示する。slug でも id でもよく、カンマ区切りで複数。"
+            "指定すると --mode の既定の対象を置き換える"
+        ),
+    )
+    parser.add_argument(
         "--min-credits",
         type=float,
         default=0.0,
@@ -1023,11 +1039,13 @@ if __name__ == "__main__":
         # tournament は FutureEval 本戦と MiniBench の両方を対象にする。
         # minibench は2週間・約60問・賞金 $1,000 で回転が速く、本戦の
         # 300〜500問に載せる前に順位と較正を測れる。
-        targets = (
-            [client.CURRENT_AI_COMPETITION_ID, client.CURRENT_MINIBENCH_ID]
-            if run_mode == "tournament"
-            else [client.CURRENT_MINIBENCH_ID]
-        )
+        if args.tournament:
+            targets = [t.strip() for t in args.tournament.split(",") if t.strip()]
+        elif run_mode == "tournament":
+            targets = [FALL_FUTUREEVAL_2026, client.CURRENT_MINIBENCH_ID]
+        else:
+            targets = [client.CURRENT_MINIBENCH_ID]
+        print(f"対象 {targets}")
         selected = asyncio.run(pick_questions(client, targets, cap))
         print(f"予測する問題 {len(selected)} 問（締切の早い順）")
         if not selected:

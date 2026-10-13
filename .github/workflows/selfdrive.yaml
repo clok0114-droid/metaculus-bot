@@ -23,6 +23,9 @@ on:
       mode:
         description: "対象（minibench / tournament / market_pulse）"
         default: minibench
+      tournament:
+        description: "対象を明示する（slug か id。空なら --mode の既定）"
+        default: ""
       max_questions:
         description: "1回の実行で予測する問題数の上限"
         default: "8"
@@ -100,6 +103,7 @@ jobs:
         env:
           SELFDRIVE_PAT: ${{ secrets.SELFDRIVE_PAT }}
           MODE: ${{ inputs.mode || 'minibench' }}
+          TOURN: ${{ inputs.tournament }}
           MAXQ: ${{ inputs.max_questions || '8' }}
           MINC: ${{ inputs.min_credits || '1.00' }}
           LEFT: ${{ inputs.iterations_left || '24' }}
